@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clinique Saint-Charles - Consultation Anesthésie</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1d3464 0%, #0f1a32 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            width: 100%;
+        }
+
+        .page-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+        }
+
+        .logo img {
+            width: min(300px, 60vw);
+            height: auto;
+        }
+
+        .page-title {
+            color: #1d3464;
+            font-size: 1.2rem;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        input[type="date"],
+        select {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            background: white;
+        }
+
+        input[type="date"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #1d3464;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+        }
+
+        select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23333' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 15px center;
+        }
+
+        .result {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            display: none;
+        }
+
+        .result.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .result-label {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+
+        .result-name {
+            color: #1d3464;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .result-instruction {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff3cd;
+            border-radius: 10px;
+            color: #856404;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .result-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .result-success {
+            background: #d4edda;
+        }
+
+        .result-success .result-name {
+            color: #155724;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #1d3464;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #999;
+            font-size: 0.8rem;
+        }
+
+        .hidden {
+            display: none;
+        }
+        /* Make Doctolib link clearly clickable */
+        #result-message a {
+            cursor: pointer;
+            text-decoration: underline;
+            color: #0072ce;
+        }
+
+        #result-message a:hover {
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <div class="logo">
+            <img src="csc-logo.png" alt="Clinique Saint-Charles">
+        </div>
+
+        <div class="container">
+            <h2 class="page-title">Consultation pré-opératoire d'anesthésie</h2>
+
+            <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Chargement des données...</p>
+        </div>
+
+        <form id="lookup-form" class="hidden">
+            <div class="form-group">
+                <label for="surgery-date">Date de l'opération</label>
+                <input type="date" id="surgery-date" required>
+            </div>
+
+            <div class="form-group">
+                <label for="surgeon">Nom du chirurgien</label>
+                <select id="surgeon" required>
+                    <option value="">-- Sélectionnez un chirurgien --</option>
+                </select>
+            </div>
+
+            <div id="result" class="result">
+                <div class="result-label">Vous devez prendre rendez-vous avec :</div>
+                <div class="result-name" id="anesthesiologist-name"></div>
+                <div class="result-instruction" id="result-message"></div>
+            </div>
+        </form>
+
+            <div class="footer">
+                <p>Veuillez vérifier que la date et le chirurgien sont corrects</p>
+            </div>
+        </div>
+    </div>
+    <script src="script.js" defer></script>
+</body>
+</html>
