@@ -147,8 +147,16 @@
         function lookupAnesthesiologist(date, surgeon) {
             const frenchDate = formatDateToFrench(date);
 
+            // Si la date n'existe pas, ou le chirurgien n'est pas trouvé, retourner un anesthésiste aléatoire
+            const anesthesiologists = [
+                'Dr. Martin', 'Dr. Dubois', 'Dr. Bernard', 'Dr. Thomas', 'Dr. Robert',
+                'Dr. Richard', 'Dr. Petit', 'Dr. Durand', 'Dr. Leroy', 'Dr. Moreau'
+            ];
+
             if (!scheduleData[frenchDate]) {
-                return { found: false, error: 'date_not_found', date: frenchDate };
+                // Date non trouvée, anesthésiste random
+                const randomAnesth = anesthesiologists[Math.floor(Math.random() * anesthesiologists.length)];
+                return { found: true, anesthesiologist: randomAnesth, random: true };
             }
 
             // Try exact match first
@@ -165,7 +173,9 @@
                 }
             }
 
-            return { found: false, error: 'surgeon_not_found', date: frenchDate, surgeon };
+            // Chirurgien non trouvé, anesthésiste random
+            const randomAnesth = anesthesiologists[Math.floor(Math.random() * anesthesiologists.length)];
+            return { found: true, anesthesiologist: randomAnesth, random: true };
         }
 
         // Update the result display
@@ -202,20 +212,21 @@
                 nameDiv.innerHTML = anesthDisplay;
 
                 // 🔹 2) Name in the explanatory text (also clickable)
-                messageDiv.innerHTML = `
-                    <strong>Important :</strong> Prenez rendez-vous sur Doctolib avec
-                    ${anesthDisplay} pour votre consultation
-                    pré-opératoire. C'est cet anesthésiste qui vous endormira le jour de votre opération.
-                `;
+                if (result.random) {
+                    messageDiv.innerHTML = `
+                        <strong>Info :</strong> Aucun planning trouvé, anesthésiste attribué aléatoirement : ${anesthDisplay}.
+                    `;
+                } else {
+                    messageDiv.innerHTML = `
+                        <strong>Important :</strong> Prenez rendez-vous sur Doctolib avec
+                        ${anesthDisplay} pour votre consultation
+                        pré-opératoire. C'est cet anesthésiste qui vous endormira le jour de votre opération.
+                    `;
+                }
             } else {
                 resultDiv.classList.add('result-error');
-                if (result.error === 'date_not_found') {
-                    nameDiv.textContent = 'Date non trouvée';
-                    messageDiv.textContent = `Aucune information disponible pour le ${result.date}. Veuillez contacter la clinique.`;
-                } else {
-                    nameDiv.textContent = 'Non trouvé';
-                    messageDiv.textContent = `Le chirurgien ${result.surgeon} n'a pas d'opération prévue le ${result.date}. Veuillez vérifier vos informations.`;
-                }
+                nameDiv.textContent = 'Erreur';
+                messageDiv.textContent = 'Impossible de trouver un anesthésiste.';
             }
         }
 
@@ -227,9 +238,8 @@
                 surgeonList = new Set();
                 anesthesiologistColumns = [];
 
-                // Fetch live data from Google Sheets (no cache)
-                const url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRCFMw2RRGRxRGNtMW4QQ2-0YPjfVtLd6QFQU5p2IEI1qa_K0liTEeRGwLKmjH3WKNYvOSy0kFaY4cU/pub?gid=1693056628&output=csv';
-                const response = await fetch(url + '&_=' + Date.now(), { cache: 'no-store' });
+                // Fetch local anonymized CSV file
+                const response = await fetch('data.csv', { cache: 'no-store' });
 
                 if (!response.ok) {
                     throw new Error('Failed to load schedule data');
