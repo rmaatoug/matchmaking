@@ -68,48 +68,25 @@
                 return;
             }
 
-            // First row contains anesthesiologist names (starting from column 2)
-            const headerRow = rows[0];
-            anesthesiologistColumns = [];
-
-            for (let i = 0; i < headerRow.length; i++) {
-                const value = headerRow[i];
-                // Check if it looks like a doctor name
-                if (value && (value.startsWith('Dr') || value.startsWith('Dr.'))) {
-                    anesthesiologistColumns[i] = value;
-                }
-            }
-
-            // Process each date row (starting from row 1)
+            // Adapté pour CSV: date, chirurgien, anesthésiste
             for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
                 const row = rows[rowIndex];
+                if (row.length < 3) continue;
+                const dateStr = row[0];
+                const surgeonName = row[1];
+                const anesthesiologist = row[2];
 
-                // Column 0 = day name, Column 1 = date
-                const dateStr = row[1];
-
-                // Validate date format (DD/MM/YYYY)
+                // Validation date
                 if (!dateStr || !/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
                     continue;
                 }
-
-                // Initialize date entry if needed
                 if (!scheduleData[dateStr]) {
                     scheduleData[dateStr] = {};
                 }
-
-                // Process surgeon assignments (columns 2+)
-                for (let colIndex = 2; colIndex < row.length; colIndex++) {
-                    const surgeonName = row[colIndex];
-                    const anesthesiologist = anesthesiologistColumns[colIndex];
-
-                    if (surgeonName && anesthesiologist) {
-                        // Clean up surgeon name
-                        const cleanSurgeon = surgeonName.trim();
-                        if (cleanSurgeon && cleanSurgeon.startsWith('Dr')) {
-                            scheduleData[dateStr][cleanSurgeon] = anesthesiologist;
-                            surgeonList.add(cleanSurgeon);
-                        }
-                    }
+                if (surgeonName && anesthesiologist) {
+                    const cleanSurgeon = surgeonName.trim();
+                    scheduleData[dateStr][cleanSurgeon] = anesthesiologist.trim();
+                    surgeonList.add(cleanSurgeon);
                 }
             }
 
