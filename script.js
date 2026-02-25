@@ -5,15 +5,7 @@
 
         // Doctolib links for anesthesiologists
         const doctolibLinks = {
-            "Dr. Aupetit": "https://www.doctolib.fr/anesthesiste/lyon/clemence-aupetit",
-            "Dr. Caillierez": "https://www.doctolib.fr/anesthesiste/lyon/romain-caillierez",
-            "Dr. Cuche": "https://www.doctolib.fr/anesthesiste/lyon/henri-cuche",
-            "Dr. Favre Felix": "https://www.doctolib.fr/anesthesiste/lyon/jeremy-favre-felix",
-            "Dr. Maatoug": "https://www.doctolib.fr/anesthesiste/lyon/adel-maatoug",
-            "Dr. Mariat": "https://www.doctolib.fr/anesthesiste/lyon/geraldine-mariat",
-            "Dr. Reymond": "https://www.doctolib.fr/anesthesiste/lyon/barnabe-reymond",
-            "Dr. Rousson": "https://www.doctolib.fr/anesthesiste/lyon/delphine-rousson",
-            "Dr. Vaudelin": "https://www.doctolib.fr/anesthesiste/lyon/guillemette-vaudelin"
+            "Dr Adel Maatoug": "https://www.doctolib.fr/anesthesiste/lyon/adel-maatoug"
         };
 
         // Parse CSV text into rows
@@ -122,37 +114,8 @@
 
         // Look up the anesthesiologist for a given date and surgeon
         function lookupAnesthesiologist(date, surgeon) {
-            const frenchDate = formatDateToFrench(date);
-
-            // Si la date n'existe pas, ou le chirurgien n'est pas trouvé, retourner un anesthésiste aléatoire
-            const anesthesiologists = [
-                'Dr. Martin', 'Dr. Dubois', 'Dr. Bernard', 'Dr. Thomas', 'Dr. Robert',
-                'Dr. Richard', 'Dr. Petit', 'Dr. Durand', 'Dr. Leroy', 'Dr. Moreau'
-            ];
-
-            if (!scheduleData[frenchDate]) {
-                // Date non trouvée, anesthésiste random
-                const randomAnesth = anesthesiologists[Math.floor(Math.random() * anesthesiologists.length)];
-                return { found: true, anesthesiologist: randomAnesth, random: true };
-            }
-
-            // Try exact match first
-            if (scheduleData[frenchDate][surgeon]) {
-                return { found: true, anesthesiologist: scheduleData[frenchDate][surgeon] };
-            }
-
-            // Try normalized match (handle "Dr." vs "Dr " variations)
-            const normalizedSurgeon = surgeon.replace(/^Dr\.?\s*/i, 'Dr. ').trim();
-            for (const [key, value] of Object.entries(scheduleData[frenchDate])) {
-                const normalizedKey = key.replace(/^Dr\.?\s*/i, 'Dr. ').trim();
-                if (normalizedKey === normalizedSurgeon) {
-                    return { found: true, anesthesiologist: value };
-                }
-            }
-
-            // Chirurgien non trouvé, anesthésiste random
-            const randomAnesth = anesthesiologists[Math.floor(Math.random() * anesthesiologists.length)];
-            return { found: true, anesthesiologist: randomAnesth, random: true };
+            // Toujours retourner Dr Adel Maatoug
+            return { found: true, anesthesiologist: "Dr Adel Maatoug", random: false };
         }
 
         // Update the result display
