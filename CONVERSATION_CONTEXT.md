@@ -8,6 +8,7 @@ Ce programme est un système de matchmaking permettant d'associer le bon anesth�
 
  - 25/02/2026 : Création du fichier CONVERSATION_CONTEXT.md pour suivre l'historique des étapes et décisions prises lors du développement.
  - 25/02/2026 : Tous les noms d'anesthésistes ont été remplacés par "Dr Adel Maatoug" dans data.csv et script.js. Le nom est désormais cliquable vers Doctolib.
+ - 25/02/2026 : Le lien vers la vidéo YouTube a été modifié pour https://www.youtube.com/watch?v=Iq0A1jabLO0.
 
 ## Prochaines étapes
 
