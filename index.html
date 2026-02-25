@@ -197,10 +197,47 @@
         </div>
 
         <div class="container">
-            <nav style="margin-bottom: 20px; text-align: right;">
-                <a href="Honoraires_de_prise_en_charge.pdf" target="_blank" style="background: #1d3464; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 500; margin-right: 10px;">Honoraires de prise en charge</a>
-                <a href="Consignes_preoperatoires_et_consentement.pdf" target="_blank" style="background: #0072ce; color: #fff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 500;">Consignes préopératoires & consentement</a>
+            <nav class="pdf-nav">
+                <a href="Honoraires_de_prise_en_charge.pdf" target="_blank" class="pdf-link honoraires">Honoraires de prise en charge</a>
+                <a href="Consignes_preoperatoires_et_consentement.pdf" target="_blank" class="pdf-link consignes">Consignes préopératoires & consentement</a>
             </nav>
+                <style>
+                    .pdf-nav {
+                        display: flex;
+                        gap: 12px;
+                        justify-content: flex-end;
+                        margin-bottom: 20px;
+                        flex-wrap: wrap;
+                    }
+                    .pdf-link {
+                        background: #1d3464;
+                        color: #fff;
+                        padding: 10px 18px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 500;
+                        transition: background 0.2s;
+                        margin-bottom: 6px;
+                        white-space: nowrap;
+                    }
+                    .pdf-link.consignes {
+                        background: #0072ce;
+                    }
+                    .pdf-link:hover {
+                        filter: brightness(1.1);
+                    }
+                    @media (max-width: 600px) {
+                        .pdf-nav {
+                            flex-direction: column;
+                            align-items: stretch;
+                            gap: 8px;
+                        }
+                        .pdf-link {
+                            width: 100%;
+                            text-align: center;
+                        }
+                    }
+                </style>
             <h2 class="page-title">Consultation pré-opératoire d'anesthésie</h2>
 
             <div id="loading" class="loading">
