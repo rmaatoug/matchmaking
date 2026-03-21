@@ -88,6 +88,7 @@ ANESTHESIA_KEYWORDS: frozenset[str] = frozenset({
     "remplacer", "remplacement", "modifier", "affecter", "planning",
     "bloc", "chirurgie", "chirurgien", "medecin", "docteur", "dr",
     "enlever", "retirer", "supprimer", "remplacez", "enlevez",
+    "travaillera", "interchang", "changement",
 })
 # Mots courants à ne pas confondre avec des noms propres
 STOPWORDS: frozenset[str] = frozenset({
@@ -184,6 +185,22 @@ def extract_dates(text: str) -> list[str]:
     return list(dict.fromkeys(found))   # déduplique en conservant l'ordre
 
 
+# ─── Marqueurs de pied d'email à tronquer ────────────────────────────────────
+_FOOTER_MARKERS = (
+    "Avertissement", "Disclaimer", "Ce message", "This email",
+    "Virus-free", "confidential", "Envoyé depuis", "Sent from",
+)
+
+
+def strip_footer(text: str) -> str:
+    """Tronque le texte au premier marqueur de pied d'email/clause de confidentialité."""
+    for marker in _FOOTER_MARKERS:
+        idx = text.find(marker)
+        if 0 < idx < len(text):
+            text = text[:idx]
+    return text.strip()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CSV
 # ══════════════════════════════════════════════════════════════════════════════
@@ -268,6 +285,37 @@ def _best_name_in_fragment(
             canonical, score = fuzzy_best(chunk_stripped, known_names, threshold=threshold)
             if canonical and score > best[1]:
                 best = (canonical, score)
+    return best
+
+
+def _best_name_partial(
+    fragment: str, known_names: list[str], threshold: int = 50
+) -> tuple[Optional[str], int]:
+    """
+    Comme _best_name_in_fragment mais utilise aussi partial_ratio pour mieux
+    détecter les prénoms partiels ou avec variantes d'accents
+    (ex: 'Adèle' → 'Dr Adel Maatoug', 'Raba' → 'Dr Rabah Le Mineur').
+    """
+    if not known_names or not fragment.strip():
+        return None, 0
+    words = fragment.split()
+    best: tuple[Optional[str], int] = (None, 0)
+    for start in range(min(len(words), 6)):
+        for end in range(start + 1, min(start + 4, len(words) + 1)):
+            chunk = " ".join(words[start:end])
+            chunk_stripped = re.sub(r"^(dr\.?\s*|docteur\s+)", "", chunk).strip()
+            if len(chunk_stripped) < 3:
+                continue
+            for canonical in known_names:
+                c_norm = normalize(strip_title(canonical))
+                score = max(
+                    fuzz.token_sort_ratio(chunk_stripped, c_norm),
+                    fuzz.partial_ratio(chunk_stripped, c_norm),
+                )
+                if score > best[1]:
+                    best = (canonical, score)
+    if best[1] < threshold:
+        return None, 0
     return best
 
 
@@ -429,6 +477,169 @@ def interpret(subject: str, body: str, data: list[dict]) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  INTERPRÉTATION MULTI-INSTRUCTIONS (PARSING PHRASE PAR PHRASE)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def interpret_sentence(
+    sentence: str,
+    dates: list[str],
+    all_known: list[str],
+    all_anest: list[str],
+    all_surg: list[str],
+    data: list[dict],
+) -> dict:
+    """
+    Interprète UNE instruction (une ligne/phrase) et retourne un dict de décision.
+    Gère les patterns conversationnels en français :
+      - "c'est X qui travaillera avec Dr Y"  → assigner X au créneau du chirurgien Y
+      - "X ne travaillera pas c'est Y"       → remplacer X par Y
+      - "X et Y interchangent"               → swap X et Y
+      - patterns classiques (fallback)
+    """
+    norm = normalize(sentence)
+    base: dict = {
+        "dates": dates,
+        "old_name": None, "old_score": 0,
+        "new_name": None, "new_score": 0,
+        "surgeon_filter": None,
+        "swap_name1": None, "swap_name2": None,
+        "confidence": 0, "action": "none", "reason": "",
+    }
+
+    if not dates:
+        return {**base, "action": "none", "reason": "Pas de date dans cette instruction."}
+
+    # ── SWAP : "X et Y interchangent" ─────────────────────────────────────────
+    m = re.search(r"(.{3,25}?)\s+et\s+(.{3,25}?)\s+interchang", norm)
+    if m:
+        name1, score1 = _best_name_partial(m.group(1).strip(), all_anest)
+        name2, score2 = _best_name_partial(m.group(2).strip(), all_anest)
+        if name1 and name2 and name1 != name2:
+            conf = min(35 + round((score1 + score2) * 0.325), 100)
+            action = "swap" if conf >= CONFIDENCE_THRESHOLD else "manual"
+            reason = "" if action == "swap" else f"Confiance trop faible ({conf}/100)."
+            return {**base, "swap_name1": name1, "swap_name2": name2,
+                    "confidence": conf, "action": action, "reason": reason}
+
+    # ── ASSIGN AVEC CHIRURGIEN : "c'est X qui travaillera avec Y" ─────────────
+    m = re.search(
+        r"c\s+est\s+(.{3,25}?)\s+qui\s+travaillera?\s+avec\s+(.{3,30})(?=\s|$)",
+        norm,
+    )
+    if m:
+        new_name, new_score = _best_name_partial(m.group(1).strip(), all_anest)
+        surg_name, _        = _best_name_partial(m.group(2).strip(), all_surg)
+        if new_name:
+            conf = min(35 + round(new_score * 0.35) + (15 if surg_name else 0), 100)
+            action = "update" if conf >= CONFIDENCE_THRESHOLD else "manual"
+            reason = "" if action == "update" else f"Confiance trop faible ({conf}/100)."
+            return {**base, "new_name": new_name, "new_score": new_score,
+                    "surgeon_filter": surg_name,
+                    "confidence": conf, "action": action, "reason": reason}
+
+    # ── REMPLACEMENT : "X ne travaillera pas c'est Y" ─────────────────────────
+    m = re.search(
+        r"(.{3,25}?)\s+ne\s+travaillera?\s+pas\s+c\s+est\s+(.{3,25})(?=\s|$)",
+        norm,
+    )
+    if m:
+        old_name, old_score = _best_name_partial(m.group(1).strip(), all_anest)
+        new_name, new_score = _best_name_partial(m.group(2).strip(), all_anest)
+        if new_name:
+            conf = 35
+            if old_name: conf += round(old_score * 0.30)
+            conf = min(conf + round(new_score * 0.35), 100)
+            action = "update" if conf >= CONFIDENCE_THRESHOLD else "manual"
+            reason = "" if action == "update" else f"Confiance trop faible ({conf}/100)."
+            return {**base, "old_name": old_name, "old_score": old_score,
+                    "new_name": new_name, "new_score": new_score,
+                    "confidence": conf, "action": action, "reason": reason}
+
+    # ── FALLBACK : patterns classiques ────────────────────────────────────────
+    old_name, old_score, new_name, new_score = extract_old_new(sentence, all_known)
+    if old_name and dates:
+        date_rows = [r for r in data if r["date"] == dates[0]]
+        if date_rows:
+            candidates_old = list({r["anesthesiologist"] for r in date_rows})
+            _, vs = fuzzy_best(old_name, candidates_old, threshold=50)
+            if vs < 50:
+                old_name, old_score = None, 0
+            else:
+                old_score = vs
+    conf = 0
+    if dates:    conf += 35
+    if old_name: conf += round(old_score * 0.30)
+    if new_name: conf += round(new_score * 0.35)
+    conf = min(conf, 100)
+
+    if not new_name:
+        return {**base, "action": "none", "reason": "Nouveau médecin non identifié."}
+    if conf < CONFIDENCE_THRESHOLD:
+        return {**base,
+                "old_name": old_name, "old_score": old_score,
+                "new_name": new_name, "new_score": new_score,
+                "confidence": conf, "action": "manual",
+                "reason": f"Confiance trop faible ({conf}/100 < seuil {CONFIDENCE_THRESHOLD})."}
+    return {**base,
+            "old_name": old_name, "old_score": old_score,
+            "new_name": new_name, "new_score": new_score,
+            "confidence": conf, "action": "update"}
+
+
+def interpret_multi(subject: str, body: str, data: list[dict]) -> list[dict]:
+    """
+    Découpe le corps de l'email en lignes (une instruction par ligne) et interprète
+    chacune séparément. Si aucune instruction valide n'est trouvée, bascule sur
+    l'interprétation monolithique classique.
+    """
+    all_anest = list({r["anesthesiologist"] for r in data})
+    all_surg  = list({r["surgeon"] for r in data})
+    all_known = all_anest + all_surg
+
+    clean_body = strip_footer(body)
+    segments = [
+        s.strip()
+        for s in re.split(r"[\n;]+", subject + "\n" + clean_body)
+        if s.strip() and len(s.strip()) > 4
+    ]
+
+    instructions: list[dict] = []
+    last_dates: list[str] = []
+
+    for seg in segments:
+        dates = extract_dates(seg)
+        if dates:
+            last_dates = dates.copy()
+        elif last_dates:
+            dates = last_dates.copy()
+
+        instr = interpret_sentence(seg, dates, all_known, all_anest, all_surg, data)
+        if instr["action"] != "none":
+            instructions.append(instr)
+
+    # Déduplique les instructions identiques (même clé date+action+noms)
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for instr in instructions:
+        key = (
+            tuple(instr["dates"]),
+            instr["action"],
+            instr.get("new_name"),
+            instr.get("swap_name1"),
+            instr.get("surgeon_filter"),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(instr)
+
+    if not unique:
+        # Aucune instruction structurée → fallback vers interprétation classique
+        return [interpret(subject, clean_body, data)]
+
+    return unique
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  MISE À JOUR DU CSV
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -454,7 +665,17 @@ def apply_update(
         if not rows_for_date:
             continue
 
-        if interp["old_name"]:
+        surgeon_filter = interp.get("surgeon_filter")
+        if surgeon_filter:
+            # Cible la ligne correspondant à un chirurgien spécifique
+            for row in rows_for_date:
+                _, match_score = fuzzy_best(
+                    row["surgeon"], [surgeon_filter], threshold=60
+                )
+                if match_score >= 60:
+                    row["anesthesiologist"] = interp["new_name"]
+                    count += 1
+        elif interp["old_name"]:
             # Remplace uniquement les lignes dont l'anesthésiste ressemble à old_name
             for row in rows_for_date:
                 _, match_score = fuzzy_best(
@@ -473,6 +694,37 @@ def apply_update(
                     f"  ⚠️  Plusieurs lignes pour le {date} et aucun ancien médecin précisé "
                     f"→ revue manuelle requise."
                 )
+
+    if count > 0 and not dry_run:
+        save_csv(DATA_FILE, new_data)
+
+    return new_data, count
+
+
+def apply_swap(
+    data: list[dict], interp: dict, dry_run: bool = False
+) -> tuple[list[dict], int]:
+    """
+    Intervertit deux anesthésistes sur les dates spécifiées.
+    Retourne (data_modifiée, nombre_de_lignes_modifiées).
+    """
+    new_data = deepcopy(data)
+    count = 0
+    name1 = interp["swap_name1"]
+    name2 = interp["swap_name2"]
+
+    for date in interp["dates"]:
+        for row in new_data:
+            if row["date"] != date:
+                continue
+            _, s1 = fuzzy_best(row["anesthesiologist"], [name1], threshold=60)
+            _, s2 = fuzzy_best(row["anesthesiologist"], [name2], threshold=60)
+            if s1 >= 60:
+                row["anesthesiologist"] = name2
+                count += 1
+            elif s2 >= 60:
+                row["anesthesiologist"] = name1
+                count += 1
 
     if count > 0 and not dry_run:
         save_csv(DATA_FILE, new_data)
@@ -652,38 +904,63 @@ def main() -> None:
             log.info("→ Ignoré (non lié à l'anesthésie / planning).")
             continue
 
-        # ── Interprétation ────────────────────────────────────────────────────
-        interp = interpret(em["subject"], em["body"], data)
+        # ── Interprétation multi-instructions ────────────────────────────────
+        interprets = interpret_multi(em["subject"], em["body"], data)
 
-        log.info(f"  Dates détectées  : {interp['dates'] or '—'}")
-        log.info(
-            f"  Ancien médecin   : {interp['old_name'] or '(non précisé)'}"
-            f"  (score {interp['old_score']})"
-        )
-        log.info(
-            f"  Nouveau médecin  : {interp['new_name'] or '(non identifié)'}"
-            f"  (score {interp['new_score']})"
-        )
-        log.info(f"  Confiance        : {interp['confidence']}/100")
-        log.info(f"  Décision         : {interp['action'].upper()}")
+        for interp in interprets:
+            if interp["action"] == "none":
+                continue
 
-        # ── Application ───────────────────────────────────────────────────────
-        if interp["action"] == "update":
-            updated_data, n = apply_update(data, interp, dry_run=args.dry_run)
-            if n > 0:
-                total_rows_changed += n
-                qualifier = "simulée" if args.dry_run else "appliquée"
-                log.info(f"  ✅ Modification {qualifier} : {n} ligne(s) mise(s) à jour.")
-                if not args.dry_run:
-                    data = updated_data  # Propagation en mémoire pour les emails suivants
+            log.info(f"  Dates            : {interp['dates'] or '—'}")
+            if interp["action"] == "swap":
+                log.info(f"  Intervertir      : {interp['swap_name1']} ↔ {interp['swap_name2']}")
             else:
-                log.warning(
-                    "  ⚠️  Aucune ligne correspondante dans data.csv "
-                    f"pour la date {interp['dates']} / médecin {interp['old_name']}."
+                log.info(
+                    f"  Ancien médecin   : {interp['old_name'] or '(non précisé)'}"
+                    f"  (score {interp['old_score']})"
                 )
-        else:
-            log.warning(f"  ⏸  Revue manuelle requise : {interp['reason']}")
-            log.warning(f"  Corps complet : {em['body'][:400]}")
+                log.info(
+                    f"  Nouveau médecin  : {interp['new_name'] or '(non identifié)'}"
+                    f"  (score {interp['new_score']})"
+                )
+                if interp.get("surgeon_filter"):
+                    log.info(f"  Chirurgien ciblé : {interp['surgeon_filter']}")
+            log.info(f"  Confiance        : {interp['confidence']}/100")
+            log.info(f"  Décision         : {interp['action'].upper()}")
+
+            # ── Application ──────────────────────────────────────────────────
+            if interp["action"] == "update":
+                updated_data, n = apply_update(data, interp, dry_run=args.dry_run)
+                if n > 0:
+                    total_rows_changed += n
+                    qualifier = "simulée" if args.dry_run else "appliquée"
+                    log.info(f"  ✅ Modification {qualifier} : {n} ligne(s) mise(s) à jour.")
+                    if not args.dry_run:
+                        data = updated_data
+                else:
+                    log.warning(
+                        "  ⚠️  Aucune ligne correspondante dans data.csv "
+                        f"pour la date {interp['dates']} / "
+                        f"médecin {interp.get('old_name') or interp.get('surgeon_filter')}."
+                    )
+            elif interp["action"] == "swap":
+                swapped_data, n = apply_swap(data, interp, dry_run=args.dry_run)
+                if n > 0:
+                    total_rows_changed += n
+                    qualifier = "simulé" if args.dry_run else "appliqué"
+                    log.info(
+                        f"  ✅ Intervertissement {qualifier} : {n} ligne(s) mise(s) à jour."
+                    )
+                    if not args.dry_run:
+                        data = swapped_data
+                else:
+                    log.warning(
+                        f"  ⚠️  Aucune ligne correspondante pour l'intervertissement "
+                        f"{interp['swap_name1']} ↔ {interp['swap_name2']} le {interp['dates']}."
+                    )
+            else:
+                log.warning(f"  ⏸  Revue manuelle requise : {interp['reason']}")
+                log.warning(f"  Corps complet : {em['body'][:400]}")
 
     if total_rows_changed > 0:
         sync_data_to_github(changed_rows=total_rows_changed, dry_run=args.dry_run)
