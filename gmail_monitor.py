@@ -34,6 +34,7 @@ import imaplib
 import logging
 import os
 import re
+import subprocess
 import sys
 import unicodedata
 from copy import deepcopy
@@ -55,7 +56,16 @@ LOG_FILE  = BASE_DIR / "email_processing.log"
 
 # ─── Configuration Gmail ──────────────────────────────────────────────────────
 GMAIL_USER     = os.environ.get("GMAIL_USER", "")
-GMAIL_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+# Les mots de passe d'application Google s'écrivent avec des espaces (affichage),
+# mais l'API IMAP attend la version sans espaces.
+GMAIL_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "")
+
+# ─── Configuration GitHub sync ────────────────────────────────────────────────
+GIT_AUTO_PUSH = os.environ.get("GIT_AUTO_PUSH", "1").strip().lower() not in {
+    "0", "false", "no", "off"
+}
+GIT_REMOTE = os.environ.get("GIT_REMOTE", "origin").strip() or "origin"
+GIT_BRANCH = os.environ.get("GIT_BRANCH", "main").strip() or "main"
 
 # ─── Seuils de confiance ──────────────────────────────────────────────────────
 CONFIDENCE_THRESHOLD  = 75   # Score global minimum pour appliquer une modification (/ 100)
@@ -539,6 +549,63 @@ def fetch_unread_emails() -> list[dict]:
     return results
 
 
+def sync_data_to_github(changed_rows: int, dry_run: bool) -> None:
+    """
+    Commit + push de data.csv vers GitHub uniquement si le fichier a changé.
+    """
+    if dry_run:
+        log.info("Sync GitHub ignorée (mode dry-run).")
+        return
+
+    if not GIT_AUTO_PUSH:
+        log.info("Sync GitHub désactivée (GIT_AUTO_PUSH=0/false).")
+        return
+
+    if not (BASE_DIR / ".git").exists():
+        log.warning("Dossier .git introuvable, impossible de pousser vers GitHub.")
+        return
+
+    def run_git(args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args],
+            cwd=BASE_DIR,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    add_res = run_git(["add", str(DATA_FILE.name)])
+    if add_res.returncode != 0:
+        log.error(f"git add a échoué: {add_res.stderr.strip() or add_res.stdout.strip()}")
+        return
+
+    staged_check = run_git(["diff", "--cached", "--quiet", "--", str(DATA_FILE.name)])
+    if staged_check.returncode == 0:
+        log.info("Aucun changement git détecté sur data.csv, pas de push.")
+        return
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    commit_msg = f"Auto-update data.csv from Gmail ({changed_rows} row(s)) - {timestamp}"
+
+    commit_res = run_git(["commit", "-m", commit_msg, "--", str(DATA_FILE.name)])
+    if commit_res.returncode != 0:
+        out = commit_res.stderr.strip() or commit_res.stdout.strip()
+        if "nothing to commit" in out.lower():
+            log.info("Rien à commit après vérification, push ignoré.")
+            return
+        log.error(f"git commit a échoué: {out}")
+        return
+
+    log.info(f"Commit créé: {commit_msg}")
+
+    push_res = run_git(["push", GIT_REMOTE, GIT_BRANCH])
+    if push_res.returncode != 0:
+        log.error(f"git push a échoué: {push_res.stderr.strip() or push_res.stdout.strip()}")
+        return
+
+    log.info(f"Push GitHub réussi vers {GIT_REMOTE}/{GIT_BRANCH}.")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  BOUCLE PRINCIPALE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -568,6 +635,8 @@ def main() -> None:
         log.info("Aucun email non lu à traiter.")
         log.info(banner)
         return
+
+    total_rows_changed = 0
 
     for em in emails:
         sep = "─" * 56
@@ -602,6 +671,7 @@ def main() -> None:
         if interp["action"] == "update":
             updated_data, n = apply_update(data, interp, dry_run=args.dry_run)
             if n > 0:
+                total_rows_changed += n
                 qualifier = "simulée" if args.dry_run else "appliquée"
                 log.info(f"  ✅ Modification {qualifier} : {n} ligne(s) mise(s) à jour.")
                 if not args.dry_run:
@@ -614,6 +684,11 @@ def main() -> None:
         else:
             log.warning(f"  ⏸  Revue manuelle requise : {interp['reason']}")
             log.warning(f"  Corps complet : {em['body'][:400]}")
+
+    if total_rows_changed > 0:
+        sync_data_to_github(changed_rows=total_rows_changed, dry_run=args.dry_run)
+    else:
+        log.info("Aucune ligne modifiée dans data.csv, synchronisation GitHub non nécessaire.")
 
     log.info(f"\n{banner}")
     log.info("Traitement terminé.")
