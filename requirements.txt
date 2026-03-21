@@ -1,0 +1,5 @@
+# Dépendances Python — gmail_monitor.py
+# Installation : pip install -r requirements.txt
+
+rapidfuzz>=3.0.0
+python-dotenv>=1.0.0

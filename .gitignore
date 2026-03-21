@@ -1,0 +1,15 @@
+# Credentials — ne jamais committer
+.env
+
+# Logs générés automatiquement
+email_processing.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# macOS
+.DS_Store
