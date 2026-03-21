@@ -114,8 +114,27 @@
 
         // Look up the anesthesiologist for a given date and surgeon
         function lookupAnesthesiologist(date, surgeon) {
-            // Toujours retourner Dr Adel Maatoug
-            return { found: true, anesthesiologist: "Dr Adel Maatoug", random: false };
+            const frenchDate = formatDateToFrench(date);
+            const daySchedule = scheduleData[frenchDate];
+
+            if (daySchedule && daySchedule[surgeon]) {
+                return { found: true, anesthesiologist: daySchedule[surgeon], random: false };
+            }
+
+            // Fallback: si pas de ligne exacte pour la date + chirurgien,
+            // on propose un anesthésiste aléatoire présent dans le CSV.
+            const allAnesthesiologists = new Set();
+            Object.values(scheduleData).forEach(day => {
+                Object.values(day).forEach(name => allAnesthesiologists.add(name));
+            });
+
+            const pool = Array.from(allAnesthesiologists);
+            if (pool.length > 0) {
+                const randomName = pool[Math.floor(Math.random() * pool.length)];
+                return { found: true, anesthesiologist: randomName, random: true };
+            }
+
+            return { found: false, anesthesiologist: null, random: false };
         }
 
         // Update the result display
